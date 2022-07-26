@@ -1,29 +1,46 @@
-require "yaml"
+require_relative 'prompt'
+require 'yaml'
 
 WORDS_FILE = 'words.txt'
 
 class Hangman
-  attr_accessor :guessed_word, :secret_word, :attempts
+  include Prompt
+
+  attr_accessor :secret_word, :guessed_word, :wrong_guesses, :attempts
 
   def initialize
     @secret_word = random_word
-    @guessed_word = secret_word.map { '_' }
+    @guessed_word = blank_word
+    @wrong_guesses = []
     @attempts = 12
   end
 
   def play
-    until game_over?
-      show_stats
-      guess = gets.chomp.downcase
+    loop do
+      header_prompt
+      current_word_prompt(guessed_word)
+      attempts_left_prompt(attempts)
+      wrong_guesses_prompt(wrong_guesses)
+      guess_prompt
+
+      guess = player_input
 
       case guess
       when 'save'
-        save_game
+        save_game(guess)
       when 'load'
-        puts load_game
+        load_game(guess)
       else
         update_guessed_word(guess)
+        update_wrong_guesses(guess)
         self.attempts -= 1
+
+        if game_over?
+          secret_word_prompt(secret_word)
+
+          play_again? ? reset_game : break
+        end
+        update_display
       end
     end
   end
@@ -36,44 +53,82 @@ class Hangman
     random_word.split('')
   end
 
+  def blank_word
+    secret_word.map { '_' }
+  end
+
   def update_guessed_word(player_char)
     secret_word.each_with_index do |char, index|
       guessed_word[index] = char if char.eql?(player_char)
     end
   end
 
+  def update_wrong_guesses(player_char)
+    unless wrong_guesses.include?(player_char) || secret_word.include?(player_char)
+      wrong_guesses << player_char
+    end
+  end
+
   def game_over?
-    guessed_word.eql?(secret_word) || attempts.zero?
+    update_display
+
+    if guessed_word.eql?(secret_word)
+      winner_prompt
+      return true
+    end
+
+    if attempts.zero?
+      loser_prompt
+      return true
+    end
   end
 
-  def show_stats
-    p attempts
-    p guessed_word
+  def play_again?
+    play_again_prompt
+    player_input == 'y'
   end
 
-  def save_game
-    Dir.mkdir('saves') unless Dir.exist?('saves')
+  def reset_game
+    self.secret_word = random_word
+    self.guessed_word = blank_word
+    self.wrong_guesses = []
+    self.attempts = 12
+  end
 
-    name = gets.chomp.downcase
+  def save_game(command)
+    save_prompt
+    file_name = player_input
     state = {
       secret_word: secret_word,
       guessed_word: guessed_word,
+      wrong_guesses: wrong_guesses,
       attempts: attempts
     }
 
-    File.open("saves/#{name}_save.yml", "w") { |file| file.write(state.to_yaml) }
+    Dir.mkdir('saves') unless Dir.exist?('saves')
+    File.open("saves/#{file_name}_save.yml", "w") { |file| file.write(state.to_yaml) }
+
+    update_display
+    valid_command_prompt(command, file_name)
   end
 
-  def load_game
-    name = gets.chomp.downcase
+  def load_game(command)
+    load_prompt
+    file_name = player_input
 
-    return 'no such a file' unless File.file?("saves/#{name}_save.yml")
+    unless File.file?("saves/#{file_name}_save.yml")
+      update_display
+      invalid_load_prompt(file_name)
+    else
+      state = YAML.load(File.read("saves/#{file_name}_save.yml"))
 
-    state = YAML.load(File.read("saves/#{name}_save.yml"))
-    self.secret_word = state[:secret_word]
-    self.guessed_word = state[:guessed_word]
-    self.attempts = state[:attempts]
+      self.secret_word = state[:secret_word]
+      self.guessed_word = state[:guessed_word]
+      self.wrong_guesses = state[:wrong_guesses]
+      self.attempts = state[:attempts]
 
-    'file loaded'
+      update_display
+      valid_command_prompt(command, file_name)
+    end
   end
 end
